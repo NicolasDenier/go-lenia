@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/mjibson/go-dsp/fft"
 	"gonum.org/v1/gonum/floats"
 	"gonum.org/v1/gonum/mat"
 )
@@ -15,7 +16,8 @@ var r0 = rand.New(seed)
 
 type Config struct {
 	// matrices
-	A, Kernel, KFFT, G *mat.Dense
+	A, Kernel, G *mat.Dense
+	KFFT         *mat.CDense
 	// parameters
 	R, T, Mu, Sigma, Dx, Dt float64
 	Beta                    []float64
@@ -41,6 +43,10 @@ func randInt(min, max int) int {
 	return r0.Intn(max-min) + min
 }
 
+func mod(a, b int) int {
+	return (a%b + b) % b
+}
+
 func Clip(n float64, min, max float64) float64 {
 	// restrict a value between two bounds
 	if n < min {
@@ -51,12 +57,95 @@ func Clip(n float64, min, max float64) float64 {
 	return n
 }
 
+func DenseToSlice(m *mat.Dense) [][]float64 {
+	// convert a Dense matrix to a 2D slice
+	var data [][]float64
+	rawData := m.RawMatrix().Data
+	r, c := m.Dims()
+	for i := 0; i < r*c; i += c {
+		data = append(data, rawData[i:i+c])
+	}
+	return data
+}
+
+func ComplexDenseToSlice(m *mat.CDense) [][]complex128 {
+	// convert a complex Dense matrix to a complex 2D slice
+	var data [][]complex128
+	rawData := m.RawCMatrix().Data
+	r, c := m.Dims()
+	for i := 0; i < r*c; i += c {
+		data = append(data, rawData[i:i+c])
+	}
+	return data
+}
+
+func ComplexSliceToDense(array [][]complex128) *mat.CDense {
+	// convert complex 2D slice to a complex Dense matrix
+	var data []complex128
+	r := len(array)
+	c := len(array[0])
+	for _, e := range array {
+		data = append(data, e...)
+	}
+	return mat.NewCDense(r, c, data)
+}
+
+func FFT(m *mat.Dense) *mat.CDense {
+	// Fast Fourier Transform
+	return ComplexSliceToDense(fft.FFT2Real(DenseToSlice(m)))
+}
+
+func IFFT(m *mat.CDense) *mat.CDense {
+	// Inverse FFT
+	return ComplexSliceToDense(fft.IFFT2(ComplexDenseToSlice(m)))
+}
+
+func FFTShift(m *mat.Dense, r, c int) *mat.Dense {
+	shifted := mat.NewDense(r, c, nil)
+	width, _ := m.Dims()
+	R := int((width - 1) / 2)
+	for i := -R; i <= R; i++ {
+		for j := -R; j <= R; j++ {
+			v := m.At(i+R, j+R)
+			shifted.Set(mod(i, c), mod(j, c), v)
+		}
+	}
+	return shifted
+}
+
+func RealPart(m *mat.CDense) *mat.Dense {
+	r, c := m.Dims()
+	realMatrix := mat.NewDense(r, c, nil)
+	realMatrix.Apply(func(i, j int, _ float64) float64 {
+		return real(m.At(i, j))
+	}, realMatrix)
+	return realMatrix
+}
+
+func ComplexMulElem(m1, m2 *mat.CDense) *mat.CDense {
+	r, c := m1.Dims()
+	result := mat.NewCDense(r, c, nil)
+	for i := 0; i < r; i++ {
+		for j := 0; j < r; j++ {
+			z1 := m1.At(i, j)
+			z2 := m2.At(i, j)
+			x1 := real(z1)
+			y1 := imag(z1)
+			x2 := real(z2)
+			y2 := imag(z2)
+			z := complex((x1*x2 - y1*y2), (x1*y2 + x2*y1))
+			result.Set(i, j, z)
+		}
+	}
+	return result
+}
+
 func (c *Config) InitState() {
 	// define the initial state of A
 	// for now, random rectangles
 	h, w := c.A.Dims()
 	// random number of rectagles
-	for k := 0; k < randInt(10, 30); k++ {
+	for k := 0; k < randInt(10, 20); k++ {
 		// random widths
 		w1 := randInt(20, 50)
 		w2 := randInt(20, 50)
@@ -68,6 +157,18 @@ func (c *Config) InitState() {
 			for j := y - w2; j < y+w2; j++ {
 				c.A.Set(i, j, r0.Float64())
 			}
+		}
+	}
+}
+
+func (c *Config) InitStateFull() {
+	// define the initial state of A
+	// for now, random rectangles
+	h, w := c.A.Dims()
+	// fill the rectangle to 1
+	for i := 0; i < w; i++ {
+		for j := 0; j < h; j++ {
+			c.A.Set(i, j, r0.Float64())
 		}
 	}
 }
@@ -104,9 +205,15 @@ func getRadiusMatrix(R int) *mat.Dense {
 	return m
 }
 
-func KernelCore(r float64) float64 {
+func KernelCorePoly(r float64) float64 {
 	var a float64 = 4
 	value := math.Pow(4*r*(1-r), a)
+	return value
+}
+
+func KernelCoreExp(r float64) float64 {
+	var a float64 = 4
+	value := math.Exp(a - a/(4*r*(1-r)))
 	return value
 }
 
@@ -124,10 +231,13 @@ func (c *Config) ComputeKernel() {
 		if v >= lenBeta {
 			return 0
 		}
-		return c.Beta[int(math.Floor(v))] * KernelCore(math.Mod(v, 1))
+		return c.Beta[int(math.Floor(v))] * KernelCoreExp(math.Mod(v, 1))
 	}, K)
 	// @kernel = @kernel_shell / sum(@kernel_shell)
 	KS.Scale(1/floats.Sum(KS.RawMatrix().Data), KS)
+	// @kernel_FFT = FFT_2D(@kernel)
+	rows, cols := c.A.Dims()
+	c.KFFT = FFT(FFTShift(KS, rows, cols))
 	// return @kernel
 	c.Kernel = mat.DenseCopyOf(KS)
 }
@@ -141,9 +251,19 @@ func (c *Config) GrowthMapping(U *mat.Dense) *mat.Dense {
 }
 
 func (c *Config) Update() {
-	// assume small world
-	// @potential = elementwise_convolution(@kernel, @world)
-	U := convolve(c.A, c.Kernel)
+	//start := time.Now()
+	var U *mat.Dense
+	// if size(@world) is small
+	if false {
+		// @potential = elementwise_convolution(@kernel, @world)
+		U = convolve(c.A, c.Kernel)
+	} else {
+		// @world_FFT = FFT_2D(@world)
+		AFFT := FFT(c.A)
+		// @potential_FFT = elementwise_multiply(@kernel_FFT, @world_FFT)
+		// @potential = FFT_shift(real_part(inverse_FFT_2D(@potential_FFT)))
+		U = RealPart(IFFT(ComplexMulElem(c.KFFT, AFFT)))
+	}
 	// @growth = growth_mapping(@potential, mu, sigma)
 	G := c.GrowthMapping(U)
 	// @new_world = clip(@world + dt * @growth, 0, 1)
@@ -155,6 +275,8 @@ func (c *Config) Update() {
 	}, A)
 	// return @new_world, @growth, @potential
 	c.A = mat.DenseCopyOf(A)
+	//elapsed := time.Since(start)
+	//fmt.Println("time elapsed:", elapsed)
 }
 
 func padMatrix(m *mat.Dense, padding int) *mat.Dense {

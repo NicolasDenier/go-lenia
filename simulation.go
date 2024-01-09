@@ -24,8 +24,8 @@ press 's' to save image
 press 'c' to close window
 */
 
-const width = 100
-const height = 100
+const width = 600
+const height = 600
 
 var simulationApp = app.New()
 var kFlag bool
@@ -88,7 +88,7 @@ func animate(raster *canvas.Raster) {
 }
 
 func getMargin(length int) float32 {
-	return float32(math.Round(width*0.23) + 1)
+	return float32(math.Round(float64(length)*0.23) + 1)
 }
 
 func initWindow(title string, winWidth, winHeight float32) fyne.Window {
@@ -124,7 +124,7 @@ func leniaWindow() fyne.Window {
 
 func kernelWindow() fyne.Window {
 	winWidth := 2*float32(setup.R) + 1
-	winMargin := getMargin(int(winWidth)) * float32(setup.R/50)
+	winMargin := getMargin(int(winWidth))
 	w := initWindow("Lenia Kernel", winWidth-winMargin, winWidth-winMargin)
 	raster := canvas.NewRasterWithPixels(displayKernel)
 	w.SetContent(raster)
@@ -156,7 +156,7 @@ func main() {
 	flag.BoolVar(&kFlag, "k", false, "display the kernel")
 	flag.Parse()
 
-	initParameters(100, 100, 0.3, 0.03, []float64{1, 0.6, 0.3})
+	initParameters(80, 10, 0.23, 0.024, []float64{1, 0.6, 0.3})
 
 	if kFlag {
 		w = kernelWindow()
