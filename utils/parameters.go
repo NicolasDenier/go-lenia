@@ -24,6 +24,7 @@ type ManageParameter interface {
 	CreateSlider()
 	GetSliderBox()
 	OnSliderChange()
+	OnSliderChangeOther()
 	Update()
 }
 
@@ -48,10 +49,10 @@ func (p *Parameter) GetStringValue() string {
 	return fmt.Sprintf("%.3f", p.GetValue())
 }
 
-func (p *Parameter) CreateSlider(min, max float64) {
+func (p *Parameter) CreateSlider(min, max, precision float64) {
 	// create the parameter slider
 	p.Slider = widget.NewSliderWithData(min, max, p.Bind)
-	p.Slider.Step = 0.001
+	p.Slider.Step = precision
 }
 
 func (p *Parameter) OnSliderChange(valueLabel *widget.Label) {
@@ -63,12 +64,26 @@ func (p *Parameter) OnSliderChange(valueLabel *widget.Label) {
 	}
 }
 
-func (p *Parameter) GetSliderBox(min, max float64, label string) *fyne.Container {
+func (p *Parameter) OnSliderChangeOther(valueLabel *widget.Label, otherVar *float64) {
+	// update the linked variables on change and the value label
+	p.Slider.OnChangeEnded = func(v float64) {
+		p.Update(v)
+		*otherVar = 1 / v
+		valueLabel.SetText(p.GetStringValue())
+		valueLabel.Refresh()
+	}
+}
+
+func (p *Parameter) GetSliderBox(min, max, precision float64, label string, otherVar *float64) *fyne.Container {
 	text := widget.NewLabel(label)
 	valueLabel := widget.NewLabel(p.GetStringValue())
-	p.CreateSlider(min, max)
+	p.CreateSlider(min, max, precision)
 	box := container.NewBorder(nil, nil, text, valueLabel, p.Slider)
-	p.OnSliderChange(valueLabel)
+	if otherVar == nil {
+		p.OnSliderChange(valueLabel)
+	} else {
+		p.OnSliderChangeOther(valueLabel, otherVar)
+	}
 	return box
 }
 

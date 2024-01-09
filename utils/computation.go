@@ -30,15 +30,6 @@ type compute interface {
 	Update()
 }
 
-func fill(length int, value float64) []float64 {
-	// create a new slice filled with the provided value
-	grid := make([]float64, length)
-	for i := range grid {
-		grid[i] = value
-	}
-	return grid
-}
-
 func randInt(min, max int) int {
 	return r0.Intn(max-min) + min
 }
@@ -125,7 +116,11 @@ func RealPart(m *mat.CDense) *mat.Dense {
 func ComplexMulElem(m1, m2 *mat.CDense) *mat.CDense {
 	r, c := m1.Dims()
 	result := mat.NewCDense(r, c, nil)
+	// commented is the addition of concurrency wich doesn't seems to improve performances here
+	//wg := sync.WaitGroup{}
 	for i := 0; i < r; i++ {
+		//wg.Add(1)
+		//go func() {
 		for j := 0; j < r; j++ {
 			z1 := m1.At(i, j)
 			z2 := m2.At(i, j)
@@ -136,6 +131,9 @@ func ComplexMulElem(m1, m2 *mat.CDense) *mat.CDense {
 			z := complex((x1*x2 - y1*y2), (x1*y2 + x2*y1))
 			result.Set(i, j, z)
 		}
+		//wg.Done()
+		//}()
+		//wg.Wait()
 	}
 	return result
 }
@@ -145,7 +143,7 @@ func (c *Config) InitState() {
 	// for now, random rectangles
 	h, w := c.A.Dims()
 	// random number of rectagles
-	for k := 0; k < randInt(10, 20); k++ {
+	for k := 0; k < randInt(15, 25); k++ {
 		// random widths
 		w1 := randInt(20, 50)
 		w2 := randInt(20, 50)
@@ -285,7 +283,7 @@ func padMatrix(m *mat.Dense, padding int) *mat.Dense {
 	nh := h + 2*padding
 	nw := w + 2*padding
 	// full of zeros
-	padded := mat.NewDense(nh, nw, fill(nh*nw, 0))
+	padded := mat.NewDense(nh, nw, nil)
 	// copy matrix at the center
 	for i := 0; i < h; i++ {
 		for j := 0; j < h; j++ {
@@ -295,7 +293,6 @@ func padMatrix(m *mat.Dense, padding int) *mat.Dense {
 	return padded
 }
 
-// TODO redefine with matrix multiplication (should be more efficient)
 func convolve(m, kernel *mat.Dense) *mat.Dense {
 	// perform a convolution between a matrix and a kernel matrix
 	p, _ := kernel.Dims()

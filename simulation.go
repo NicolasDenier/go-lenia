@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"math"
 	"rd/utils"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -13,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/widget"
 	"gonum.org/v1/gonum/mat"
 )
 
@@ -29,6 +31,8 @@ const height = 600
 
 var simulationApp = app.New()
 var kFlag bool
+var running bool = true
+var wg sync.WaitGroup
 
 // define system parameters
 var R utils.Parameter
@@ -82,8 +86,12 @@ func displayKernel(i, j, w, h int) color.Color {
 func animate(raster *canvas.Raster) {
 	// update the canvas at a regulat time tick
 	for range time.Tick(time.Millisecond * time.Duration(1000*setup.Dt)) {
-		setup.Update()
-		raster.Refresh()
+		if running {
+			wg.Add(1)
+			setup.Update()
+			raster.Refresh()
+			wg.Done()
+		}
 	}
 }
 
@@ -100,6 +108,34 @@ func initWindow(title string, winWidth, winHeight float32) fyne.Window {
 	return w
 }
 
+func StartButton() *widget.Button {
+	startButton := widget.NewButton("stop", nil)
+	startButton.OnTapped = func() {
+		running = !running
+		if running {
+			startButton.Text = "stop"
+		} else {
+			startButton.Text = "start"
+		}
+		startButton.Refresh()
+	}
+	return startButton
+}
+
+func RestartButton(raster *canvas.Raster) *widget.Button {
+	restartButton := widget.NewButton("restart", func() {
+		// stop simulation, wait for last update to complete and restart it with a new initial state
+		wasRunning := running
+		running = false
+		wg.Wait()
+		setup.A = mat.NewDense(width, height, nil)
+		setup.InitState()
+		raster.Refresh()
+		running = wasRunning
+	})
+	return restartButton
+}
+
 func leniaWindow() fyne.Window {
 	// define the lenia app
 	// define window size
@@ -108,12 +144,17 @@ func leniaWindow() fyne.Window {
 	w := initWindow("Lenia State", winWidth, winHeight)
 	// raster is the pixel matrix and its update function
 	raster := canvas.NewRasterWithPixels(displayState)
+	// buttons
+	buttons := container.New(layout.NewHBoxLayout(),
+		StartButton(), RestartButton(raster))
+
 	// sliders
 	controls := container.New(layout.NewVBoxLayout(),
-		R.GetSliderBox(0, 100, "R"),
-		T.GetSliderBox(0, 100, "T"),
-		Mu.GetSliderBox(0, 1, "Mu"),
-		Sigma.GetSliderBox(0, 1, "Sigma"))
+		R.GetSliderBox(0, 200, 1, "R", &setup.Dx),
+		T.GetSliderBox(0, 100, 1, "T", &setup.Dt),
+		Mu.GetSliderBox(0, 1, 0.001, "Mu", nil),
+		Sigma.GetSliderBox(0, 1, 0.001, "Sigma", nil),
+		buttons)
 	// 2 columns: lenia state and parameters
 	grid := container.New(layout.NewGridLayout(2), raster, controls)
 	w.SetContent(grid)
