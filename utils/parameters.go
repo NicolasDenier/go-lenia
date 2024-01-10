@@ -2,6 +2,8 @@ package utils
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -75,6 +77,7 @@ func (p *Parameter) OnSliderChangeOther(valueLabel *widget.Label, otherVar *floa
 }
 
 func (p *Parameter) GetSliderBox(min, max, precision float64, label string, otherVar *float64) *fyne.Container {
+	// generate a box containing the name of a variable, a slider and its value that is updated on slider change
 	text := widget.NewLabel(label)
 	valueLabel := widget.NewLabel(p.GetStringValue())
 	p.CreateSlider(min, max, precision)
@@ -82,6 +85,7 @@ func (p *Parameter) GetSliderBox(min, max, precision float64, label string, othe
 	if otherVar == nil {
 		p.OnSliderChange(valueLabel)
 	} else {
+		// also update another variable (for example T updates dT=1/T)
 		p.OnSliderChangeOther(valueLabel, otherVar)
 	}
 	return box
@@ -90,4 +94,15 @@ func (p *Parameter) GetSliderBox(min, max, precision float64, label string, othe
 func (p *Parameter) Update(value float64) {
 	// update the parameter linked variable
 	*p.variable = value
+}
+
+func FlagToBeta(s string) []float64 {
+	// parse the -b flag values to a float array
+	var beta []float64
+	for _, value := range strings.Split(s, ",") {
+		if parsed, err := strconv.ParseFloat(value, 64); err == nil {
+			beta = append(beta, parsed)
+		}
+	}
+	return beta
 }

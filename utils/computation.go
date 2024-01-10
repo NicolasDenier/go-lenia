@@ -11,8 +11,7 @@ import (
 )
 
 // for random generation
-var seed = rand.NewSource(time.Now().UnixNano())
-var r0 = rand.New(seed)
+var r0 = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 type Config struct {
 	// matrices
@@ -31,10 +30,12 @@ type compute interface {
 }
 
 func randInt(min, max int) int {
+	// random nteger between min and max
 	return r0.Intn(max-min) + min
 }
 
 func mod(a, b int) int {
+	// positive modulo
 	return (a%b + b) % b
 }
 
@@ -71,7 +72,7 @@ func ComplexDenseToSlice(m *mat.CDense) [][]complex128 {
 }
 
 func ComplexSliceToDense(array [][]complex128) *mat.CDense {
-	// convert complex 2D slice to a complex Dense matrix
+	// convert a complex 2D slice to a complex Dense matrix
 	var data []complex128
 	r := len(array)
 	c := len(array[0])
@@ -92,6 +93,7 @@ func IFFT(m *mat.CDense) *mat.CDense {
 }
 
 func FFTShift(m *mat.Dense, r, c int) *mat.Dense {
+	// FFT shift, transform a kernel matrix for example by shifting its center to the top left of a bigger matrix
 	shifted := mat.NewDense(r, c, nil)
 	width, _ := m.Dims()
 	R := int((width - 1) / 2)
@@ -105,6 +107,7 @@ func FFTShift(m *mat.Dense, r, c int) *mat.Dense {
 }
 
 func RealPart(m *mat.CDense) *mat.Dense {
+	// returns only the real parts of a complex matrix
 	r, c := m.Dims()
 	realMatrix := mat.NewDense(r, c, nil)
 	realMatrix.Apply(func(i, j int, _ float64) float64 {
@@ -114,6 +117,7 @@ func RealPart(m *mat.CDense) *mat.Dense {
 }
 
 func ComplexMulElem(m1, m2 *mat.CDense) *mat.CDense {
+	// multiply element wise two complex matrices of same size
 	r, c := m1.Dims()
 	result := mat.NewCDense(r, c, nil)
 	// commented is the addition of concurrency wich doesn't seems to improve performances here
@@ -140,10 +144,10 @@ func ComplexMulElem(m1, m2 *mat.CDense) *mat.CDense {
 
 func (c *Config) InitState() {
 	// define the initial state of A
-	// for now, random rectangles
+	// fill random rectangles with random values
 	h, w := c.A.Dims()
-	// random number of rectagles
-	for k := 0; k < randInt(15, 25); k++ {
+	// random number of rectagles according to window size
+	for k := 0; k < randInt(int(w/50), int(w/30)); k++ {
 		// random widths
 		w1 := randInt(20, 50)
 		w2 := randInt(20, 50)
@@ -161,29 +165,25 @@ func (c *Config) InitState() {
 
 func (c *Config) InitStateFull() {
 	// define the initial state of A
-	// for now, random rectangles
-	h, w := c.A.Dims()
-	// fill the rectangle to 1
-	for i := 0; i < w; i++ {
-		for j := 0; j < h; j++ {
-			c.A.Set(i, j, r0.Float64())
-		}
-	}
+	// fill A with random values
+	c.A.Apply(func(i, j int, v float64) float64 {
+		return r0.Float64()
+	}, c.A)
 }
 
 func NewConfig(h, w int, R, T, Mu, Sigma float64, Beta []float64) Config {
 	// create a new config with all variables initialized
 	setup := Config{
-		A: mat.NewDense(h, w, nil),
+		A:     mat.NewDense(h, w, nil),
+		T:     T,
+		R:     R,
+		Mu:    Mu,
+		Sigma: Sigma,
+		Beta:  Beta,
 	}
-	// set parameters
-	setup.T = T
-	setup.R = R
-	setup.Mu = Mu
-	setup.Sigma = Sigma
+	// additional parameters
 	setup.Dx = float64(1 / R)
 	setup.Dt = float64(1 / T)
-	setup.Beta = Beta
 	// compute Kernel
 	setup.ComputeKernel()
 	// initialize A
@@ -204,74 +204,78 @@ func getRadiusMatrix(R int) *mat.Dense {
 }
 
 func KernelCorePoly(r float64) float64 {
+	// kernel core function, polynomial
 	var a float64 = 4
 	value := math.Pow(4*r*(1-r), a)
 	return value
 }
 
 func KernelCoreExp(r float64) float64 {
+	// kernel core function, exponential
 	var a float64 = 4
 	value := math.Exp(a - a/(4*r*(1-r)))
 	return value
 }
 
 func (c *Config) ComputeKernel() {
-	// @radius = get_polar_radius_matrix(SIZE_X, SIZE_Y) * dx
+	// compute the kernel and its fourier transform
+	// cf. https://arxiv.org/pdf/1812.05433.pdf section 2.2.1
+	// get radius matrix and scale it by dx and the size of beta
 	K := getRadiusMatrix(int(c.R))
-	K.Scale(c.Dx, K)
-	// @Br = size(beta) * @radius
 	lenBeta := float64(len(c.Beta))
-	K.Scale(lenBeta, K)
-	// @kernel_shell = beta[floor(@Br)] * kernel_core(@Br % 1)
-	KS := mat.DenseCopyOf(K)
-	KS.Apply(func(_, _ int, v float64) float64 {
-		// distance to the center over lenBeta is ignored
+	lenBetaDx := lenBeta * c.Dx
+	K.Scale(lenBetaDx, K)
+	// compute kernel shell, based on kernel core repeated in concentric rings for each element of beta
+	K.Apply(func(_, _ int, v float64) float64 {
+		// distance to the center over lenBeta is ignored (no beta element for these indexes)
 		if v >= lenBeta {
 			return 0
 		}
 		return c.Beta[int(math.Floor(v))] * KernelCoreExp(math.Mod(v, 1))
 	}, K)
-	// @kernel = @kernel_shell / sum(@kernel_shell)
-	KS.Scale(1/floats.Sum(KS.RawMatrix().Data), KS)
-	// @kernel_FFT = FFT_2D(@kernel)
+	// normalize kernel
+	sumK := 1 / floats.Sum(K.RawMatrix().Data)
+	K.Scale(sumK, K)
+	// compute FFT
 	rows, cols := c.A.Dims()
-	c.KFFT = FFT(FFTShift(KS, rows, cols))
-	// return @kernel
-	c.Kernel = mat.DenseCopyOf(KS)
+	c.KFFT = FFT(FFTShift(K, rows, cols))
+	// update the kernel in the config
+	c.Kernel = mat.DenseCopyOf(K)
 }
 
 func (c *Config) GrowthMapping(U *mat.Dense) *mat.Dense {
-	// exponential
+	// growth mapping function, exponential
+	s := (2 * math.Pow(c.Sigma, 2))
 	U.Apply(func(_, _ int, v float64) float64 {
-		return 2*math.Exp(-1*math.Pow(v-c.Mu, 2)/(2*math.Pow(c.Sigma, 2))) - 1
+		return 2*math.Exp(-1*math.Pow(v-c.Mu, 2)/s) - 1
 	}, U)
 	return U
 }
 
 func (c *Config) Update() {
+	// compute the next state
 	//start := time.Now()
 	var U *mat.Dense
-	// if size(@world) is small
+	// compute U, the potential
+	// if size of world is small (for now always off)
 	if false {
-		// @potential = elementwise_convolution(@kernel, @world)
+		// convolution approach
 		U = convolve(c.A, c.Kernel)
 	} else {
-		// @world_FFT = FFT_2D(@world)
+		// FFT approach
 		AFFT := FFT(c.A)
-		// @potential_FFT = elementwise_multiply(@kernel_FFT, @world_FFT)
-		// @potential = FFT_shift(real_part(inverse_FFT_2D(@potential_FFT)))
 		U = RealPart(IFFT(ComplexMulElem(c.KFFT, AFFT)))
 	}
-	// @growth = growth_mapping(@potential, mu, sigma)
+	// Apply growth scaled by dt
 	G := c.GrowthMapping(U)
-	// @new_world = clip(@world + dt * @growth, 0, 1)
 	G.Scale(c.Dt, G)
 	A := mat.DenseCopyOf(c.A)
 	A.Add(A, G)
+	// clip values
 	A.Apply(func(_, _ int, v float64) float64 {
 		return Clip(v, 0, 1)
 	}, A)
-	// return @new_world, @growth, @potential
+	// update the state in the config
 	c.A = mat.DenseCopyOf(A)
 	//elapsed := time.Since(start)
 	//fmt.Println("time elapsed:", elapsed)
