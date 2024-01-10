@@ -26,6 +26,7 @@ press 's' to save image
 press 'c' to close window
 */
 
+// global variables
 const width = 512
 const height = 512
 
@@ -33,6 +34,8 @@ var simulationApp = app.New()
 var kFlag bool
 var running bool = true
 var wg sync.WaitGroup
+var colormap utils.ColormapButton
+var colors [][]int
 
 // define system parameters
 var R utils.Parameter
@@ -55,13 +58,8 @@ func initParameters(R_val, T_val, Mu_val, Sigma_val float64, Beta_val []float64)
 func displayState(i, j, w, h int) color.Color {
 	// update the pixels colors according to the state matrix
 	if i < width && j < height {
-		amount := 1 - setup.A.At(i, j)
-		col := uint8(utils.Clip(amount, 0, 1) * 255)
-		return color.RGBA{
-			col,
-			col,
-			col,
-			0xff}
+		amount := setup.A.At(i, j)
+		return colormap.GetColor(utils.Clip(amount, 0, 1))
 	} else {
 		return color.Black
 	}
@@ -150,6 +148,8 @@ func leniaWindow() fyne.Window {
 	w := initWindow("Lenia State", winWidth, winHeight)
 	// raster is the pixel matrix and its update function
 	raster := canvas.NewRasterWithPixels(displayState)
+	// colormap
+	colormap = utils.CreateColormapButton(&colors, raster)
 	// buttons
 	buttons := container.New(layout.NewHBoxLayout(),
 		StartButton(), RestartButton(raster))
@@ -160,7 +160,8 @@ func leniaWindow() fyne.Window {
 		T.GetSliderBox(0, 100, 1, "T", &setup.Dt),
 		Mu.GetSliderBox(0, 1, 0.001, "Mu", nil),
 		Sigma.GetSliderBox(0, 1, 0.001, "Sigma", nil),
-		buttons)
+		buttons,
+		colormap.Buttons)
 	// 2 columns: lenia state and parameters
 	grid := container.New(layout.NewGridLayout(2), raster, controls)
 	w.SetContent(grid)

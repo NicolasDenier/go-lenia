@@ -26,11 +26,12 @@ Add `-h` for help, to see how to change the default parameters values:
     set the timeline (default 40)
 ```
 ## Controls
-During the run, the parameters can be tweaked with sliders.  
-Press `c` to close the window, or ctrl+C in terminal.  
-Press`s` to take a screenshot.
+- During the run, the parameters can be tweaked with sliders.  
+- The colormap can be changed as well.  
+- Press `c` to close the window, or ctrl+C in terminal.  
+- Press`s` to take a screenshot.
+- Start/stop and restart buttons allow to manage the simulation.
 
-Start/stop and restart buttons allow to manage the simulation.
 ![](images/parameters.png)
 
 Extra parameters such as window size can be changed in the source code. 
