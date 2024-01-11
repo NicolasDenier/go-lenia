@@ -69,27 +69,32 @@ func (p *Parameter) OnSliderChange(valueLabel *widget.Label) {
 	}
 }
 
-func (p *Parameter) OnSliderChangeOther(valueLabel *widget.Label, otherVar *float64) {
+func (p *Parameter) OnSliderChangeOther(valueLabel *widget.Label, name string, setup *Config) {
 	// update the linked variables on change and the value label
 	p.Slider.OnChangeEnded = func(v float64) {
 		p.Update(v)
-		*otherVar = 1 / v
+		if name == "T" {
+			setup.Dt = 1 / v
+		} else if name == "R" {
+			setup.Dx = 1 / v
+			setup.ComputeKernel()
+		}
 		valueLabel.SetText(p.GetStringValue())
 		valueLabel.Refresh()
 	}
 }
 
-func (p *Parameter) GetSliderBox(min, max, precision float64, label string, otherVar *float64) *fyne.Container {
+func (p *Parameter) GetSliderBox(min, max, precision float64, label string, setup *Config) *fyne.Container {
 	// generate a box containing the name of a variable, a slider and its value that is updated on slider change
 	text := widget.NewLabel(label)
 	valueLabel := widget.NewLabel(p.GetStringValue())
 	p.CreateSlider(min, max, precision)
 	box := container.NewBorder(nil, nil, text, valueLabel, p.Slider)
-	if otherVar == nil {
+	if setup == nil {
 		p.OnSliderChange(valueLabel)
 	} else {
 		// also update another variable (for example T updates dT=1/T)
-		p.OnSliderChangeOther(valueLabel, otherVar)
+		p.OnSliderChangeOther(valueLabel, label, setup)
 	}
 	return box
 }

@@ -156,8 +156,8 @@ func leniaWindow() fyne.Window {
 
 	// sliders and control panel
 	controls := container.New(layout.NewVBoxLayout(),
-		R.GetSliderBox(0, 200, 1, "R", &setup.Dx),
-		T.GetSliderBox(0, 100, 1, "T", &setup.Dt),
+		R.GetSliderBox(0, 200, 1, "R", &setup),
+		T.GetSliderBox(0, 100, 1, "T", &setup),
 		Mu.GetSliderBox(0, 1, 0.001, "Mu", nil),
 		Sigma.GetSliderBox(0, 1, 0.001, "Sigma", nil),
 		buttons,
